@@ -495,8 +495,12 @@ impl FontDb {
         let mut new = Vec::new();
         for f in found {
             let label = format!("{} {}", f.family, f.style);
-            let face = make_face(FontBytes::Owned(data.clone()), f.index, f.family, f.style, f.legacy, f.coords)
+            let mut face = make_face(FontBytes::Owned(data.clone()), f.index, f.family, f.style, f.legacy, f.coords)
                 .ok_or_else(|| UserFontError::Unusable(format!("{label} doesn't parse")))?;
+            // Its names in other languages (宋体 for SimSun), as every other face keeps them: the
+            // font list shows those in a matching interface language, and text set by one resolves
+            // to this face (#505).
+            face.local_names = f.local;
             if face.skrifa().is_none_or(|s| s.charmap().mappings().next().is_none()) {
                 return Err(UserFontError::Unusable(format!("{label} maps no characters")));
             }

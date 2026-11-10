@@ -473,7 +473,7 @@ fn coverage_ranges_hold_exactly_the_mapped_characters() {
 
 /// A bundled font renamed by a `name` table holding just its family names: (Windows language id,
 /// name) pairs, English (0x0409) first, as SimSun's names 宋体 for Simplified Chinese.
-fn with_family_names(file: &str, names: &[(u16, &str)]) -> Vec<u8> {
+pub(crate) fn with_family_names(file: &str, names: &[(u16, &str)]) -> Vec<u8> {
     let data = std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/fonts").join(file)).unwrap();
     let font = skrifa::FontRef::new(&data).unwrap();
     // Records sorted by language, then name ID: family (1) and subfamily (2, English only).
