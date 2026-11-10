@@ -250,6 +250,12 @@ fn options_panes_open_and_change_settings() {
     h.get_by_label("Spaces").click();
     h.run_steps(2);
     assert!(h.state().session.prefs.marks.spaces, "Display › Spaces");
+    h.get_by_label("Highlight the text bookmarks cover").click();
+    h.run_steps(2);
+    assert!(!h.state().session.prefs.highlight_bookmarks, "Display ▸ the band over bookmarked text");
+    h.get_by_label("Highlight the text bookmarks cover").click();
+    h.run_steps(2);
+    assert!(h.state().session.prefs.highlight_bookmarks, "and it goes back on");
     // #2797: what the status bar's count shows, chosen here as in its right-click menu. The
     // Display pane's other combo box is Numerals, drawn above this one.
     h.get_all_by_role(egui::accesskit::Role::ComboBox).last().expect("the status bar count picker").click();

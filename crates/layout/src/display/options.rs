@@ -42,6 +42,9 @@ pub struct DisplayOptions {
     pub markup: bool,
     /// Show on-screen-only marks: equation placeholders and prompts (never in print or PDF).
     pub placeholders: bool,
+    /// Paint a band over the text each bookmark covers (File › Options › Display). On screen
+    /// only: like the placeholders it is a marker for the person editing, not part of the page.
+    pub bookmarks: bool,
     /// Review › Hide Ink: leave ink strokes out (they stay in the document).
     pub hide_ink: bool,
     /// How tracked changes and comments are marked when `markup` is on (Track Changes Options).
@@ -60,6 +63,7 @@ impl Default for DisplayOptions {
             dim_body: false,
             markup: true,
             placeholders: false,
+            bookmarks: false,
             hide_ink: false,
             revisions: MarkupOptions::default(),
             hide_object: None,
