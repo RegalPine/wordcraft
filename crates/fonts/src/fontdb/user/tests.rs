@@ -264,6 +264,29 @@ fn an_added_font_is_listed_resolved_and_measured() {
     assert_eq!(db.user_fonts().len(), 1);
 }
 
+/// A font added at run time keeps the family names its `name` table gives in other languages, as
+/// an installed one does: the list shows it by its Chinese name in a Chinese interface, and text
+/// set by that name finds it. On the web these are the only fonts, so without this the list there
+/// is English names only and a document's 宋体 never matches the SimSun added for it (#505).
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_added_font_keeps_its_family_names_in_other_languages() {
+    use crate::fontdb::tests::sysfonts::with_family_names;
+    let db = db();
+    let bytes = with_family_names("SourceSans3-Regular.ttf", &[(0x0409, FAMILY), (0x0804, "测试宋体"), (0x0404, "測試宋體")]);
+    db.install_font("song.ttf", &bytes).unwrap();
+    let listed = |list: &[String], name: &str| list.iter().any(|f| f == name);
+    assert!(listed(&db.families_in("en"), FAMILY), "{:?}", db.families_in("en"));
+    let hans = db.families_in("zh-hans");
+    assert!(listed(&hans, "测试宋体") && !listed(&hans, FAMILY), "{hans:?}");
+    assert_eq!(db.english_family("测试宋体").as_deref(), Some(FAMILY));
+    assert_eq!(db.english_family("測試宋體").as_deref(), Some(FAMILY));
+    // Either Chinese name resolves to the added face.
+    assert_eq!(db.face("测试宋体", "Regular").family, FAMILY);
+    assert_eq!(db.face("測試宋體", "Regular").id(), db.face(FAMILY, "Regular").id());
+    assert_eq!(db.styles("测试宋体"), ["Regular".to_string()]);
+}
+
 #[test]
 fn the_bundled_baseline_is_never_replaced() {
     let db = db();
