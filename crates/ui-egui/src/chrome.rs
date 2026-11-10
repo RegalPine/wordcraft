@@ -663,8 +663,11 @@ pub fn screen_bar(app: &mut WordApp, ui: &mut Ui, screen: Screen) {
             let shade = if resp.hovered() || app.focus_ribbon { egui::Color32::from_gray(70) } else { egui::Color32::from_gray(40) };
             ui.painter().rect_filled(r, 4.0, shade);
             icons::paint(ui.painter(), Rect::from_center_size(r.center(), vec2(14.0, 14.0)), "more", egui::Color32::from_gray(220), t.accent);
-            resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tl!("Show the ribbon")));
-            if resp.on_hover_text(tl!("Show the ribbon")).clicked() {
+            // The bar's own word for the ribbon, saying what the click does: dropped, it puts it away.
+            // The ribbon's pin says the same about the window's ribbon, which Focus hides.
+            let bar_label = tl!(if app.focus_ribbon { "Hide the ribbon" } else { "Show the ribbon" });
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, bar_label));
+            if resp.on_hover_text(bar_label).clicked() {
                 let _ = app.run("ui.focusRibbon", json!({}));
             }
         } else {

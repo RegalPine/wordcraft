@@ -87,8 +87,11 @@ const PIN_W: f32 = 24.0;
 const OPTIONS_W: f32 = 24.0;
 
 /// How close to the top of the window the pointer has to be for an auto-hidden ribbon to come
-/// down. Word's is a few pixels: enough to reach on purpose, too narrow to open by accident on the
-/// way to the page.
+/// down: the top six points of the window, measured in our own window at 2× — the pointer at 13 pt
+/// from the top brings the ribbon down, 16 pt leaves it away. Wide enough to hit on purpose,
+/// narrow enough not to cross on the way from the title bar to the page. Word's band is the same
+/// idea but was not measurable from outside its window; and once the ribbon is down the pointer is
+/// over it, so a wider band only means it opens sooner on the way up.
 const REVEAL_H: f32 = 6.0;
 
 /// Word's Ribbon Display Options (the arrow at the tab row's far end, and `ui.ribbonDisplay`):
@@ -261,7 +264,7 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
     // away, over the page — so a peek covers the page instead of pushing it down, as Word's does and
     // as Focus's ribbon already does.
     let draw_tabs = |app: &mut WordApp, ui: &mut Ui| {
-        egui::Panel::top("tabs")
+        let tabs = egui::Panel::top("tabs")
             .exact_size(TABS_H)
             .frame(egui::Frame::NONE.fill(t.tab_strip).inner_margin(egui::Margin { left: 8, right: 10, top: 0, bottom: 0 }))
             .show(ui, |ui| {
@@ -275,6 +278,9 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
                         let comments = tl!("Comments");
                         let share_w = ui.ctx().fonts_mut(|f| f.layout_no_wrap(share.to_string(), medium(12.0), t.text).size().x);
                         let spaced = |w: f32| w + 2.0;
+                        // The two display buttons' room, when the row shows them: Focus's dropped ribbon
+                        // sets nothing about the window's ribbon, so it doesn't carry them.
+                        let display_w = if app.focus_ribbon { 0.0 } else { spaced(PIN_W) + spaced(OPTIONS_W) };
                         let button_widths = |level: usize| -> f32 {
                             let labels = level == 0;
                             let share_full = (share_w + 36.0).max(74.0);
@@ -282,7 +288,7 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
                             let editing = crate::widgets::icon_text_button_width(ui, editing_label, regular(12.0), true, labels);
                             let comment = crate::widgets::icon_text_button_width(ui, comments, regular(12.0), false, labels);
                             // The gaps (6 + 4 + 8 + 6), the two end buttons and the strip's margin.
-                            spaced(share_button) + spaced(editing) + spaced(comment) + spaced(PIN_W) + spaced(OPTIONS_W) + 18.0 + 12.0
+                            spaced(share_button) + spaced(editing) + spaced(comment) + display_w + 18.0 + 12.0
                         };
                         let button_levels = [button_widths(0), button_widths(1), button_widths(2)];
                         let labels: Vec<&str> = tabs.iter().map(|(tab, custom)| if *custom { tab.as_str() } else { tl!(tab) }).collect();
@@ -298,54 +304,58 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
                             .collect();
                         let plan = plan_strip(&specs, button_levels, ui.available_width(), MORE_TABS_W + 2.0);
                         ui.with_layout(crate::rtl::far_side(ui, egui::Align::Center), |ui| {
-                            // Word's Ribbon Display Options, at the tab row's far end: the three ways the
-                            // ribbon can sit. The pin below toggles two of them, and only this menu
-                            // reaches auto-hide, where the tabs go away with the commands.
-                            let display = app.ui.ribbon_display;
-                            let (or, options) = ui.allocate_exact_size(vec2(OPTIONS_W, TABS_H), Sense::click());
-                            if options.hovered() {
-                                ui.painter().rect_filled(or.shrink2(vec2(2.0, 6.0)), 4.0, t.hover);
-                            }
-                            icons::paint(
-                                ui.painter(),
-                                Rect::from_center_size(pos2(or.center().x, or.center().y), vec2(14.0, 14.0)),
-                                "ribbon-options",
-                                t.text,
-                                t.accent,
-                            );
-                            let options_label = tl!("Ribbon Display Options");
-                            options.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, false, options_label));
-                            crate::rtl::menu(&options.on_hover_text(options_label)).show(|ui| {
-                                for d in RibbonDisplay::ALL {
-                                    let name = tl!(d.label());
-                                    if ui.selectable_label(display == d, name).clicked() {
-                                        let _ = app.run("ui.ribbonDisplay", json!({"value": d.code()}));
-                                        ui.close();
-                                    }
+                            // Word's Ribbon Display Options and pin, at the tab row's far end. Focus's
+                            // dropped ribbon carries neither: both set how the window's own ribbon sits, and
+                            // Focus has no window ribbon. Its bar's "⋯" is what puts the dropped one away.
+                            if !app.focus_ribbon {
+                                // The three ways the ribbon can sit. The pin below toggles two of them, and
+                                // only this menu reaches auto-hide, where the tabs go with the commands.
+                                let display = app.ui.ribbon_display;
+                                let (or, options) = ui.allocate_exact_size(vec2(OPTIONS_W, TABS_H), Sense::click());
+                                if options.hovered() {
+                                    ui.painter().rect_filled(or.shrink2(vec2(2.0, 6.0)), 4.0, t.hover);
                                 }
-                            });
-                            ui.add_space(6.0);
-                            // Word's pin, next to it: the mouse way to put the commands away and keep
-                            // them. Double-clicking a tab and Ctrl+F1 do the same, but nothing on screen
-                            // said so, and no keyboard is available on a touch screen.
-                            let pinned = !display.collapsed();
-                            let pin_label = if pinned { tl!("Hide the ribbon") } else { tl!("Show the ribbon") };
-                            let (pr, pin) = ui.allocate_exact_size(vec2(PIN_W, TABS_H), Sense::click());
-                            if pin.hovered() {
-                                ui.painter().rect_filled(pr.shrink2(vec2(2.0, 6.0)), 4.0, t.hover);
+                                icons::paint(
+                                    ui.painter(),
+                                    Rect::from_center_size(pos2(or.center().x, or.center().y), vec2(14.0, 14.0)),
+                                    "ribbon-options",
+                                    t.text,
+                                    t.accent,
+                                );
+                                let options_label = tl!("Ribbon Display Options");
+                                options.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, false, options_label));
+                                crate::rtl::menu(&options.on_hover_text(options_label)).show(|ui| {
+                                    for d in RibbonDisplay::ALL {
+                                        let name = tl!(d.label());
+                                        if ui.selectable_label(display == d, name).clicked() {
+                                            let _ = app.run("ui.ribbonDisplay", json!({"value": d.code()}));
+                                            ui.close();
+                                        }
+                                    }
+                                });
+                                ui.add_space(6.0);
+                                // Word's pin, next to it: the mouse way to put the commands away and keep
+                                // them. Double-clicking a tab and Ctrl+F1 do the same, but nothing on screen
+                                // said so, and no keyboard is available on a touch screen.
+                                let pinned = !display.collapsed();
+                                let pin_label = if pinned { tl!("Hide the ribbon") } else { tl!("Show the ribbon") };
+                                let (pr, pin) = ui.allocate_exact_size(vec2(PIN_W, TABS_H), Sense::click());
+                                if pin.hovered() {
+                                    ui.painter().rect_filled(pr.shrink2(vec2(2.0, 6.0)), 4.0, t.hover);
+                                }
+                                icons::paint(
+                                    ui.painter(),
+                                    Rect::from_center_size(pos2(pr.center().x, pr.center().y), vec2(14.0, 14.0)),
+                                    if pinned { "pin" } else { "unpin" },
+                                    t.text,
+                                    t.accent,
+                                );
+                                pin.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, pinned, pin_label));
+                                if pin.on_hover_text(pin_label).clicked() {
+                                    let _ = app.run("ui.collapseRibbon", json!({}));
+                                }
+                                ui.add_space(6.0);
                             }
-                            icons::paint(
-                                ui.painter(),
-                                Rect::from_center_size(pos2(pr.center().x, pr.center().y), vec2(14.0, 14.0)),
-                                if pinned { "pin" } else { "unpin" },
-                                t.text,
-                                t.accent,
-                            );
-                            pin.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, pinned, pin_label));
-                            if pin.on_hover_text(pin_label).clicked() {
-                                let _ = app.run("ui.collapseRibbon", json!({}));
-                            }
-                            ui.add_space(6.0);
                             // No document open (#1129): nothing to share, edit or comment on — but only
                             // these buttons. Disabling the whole line took the tab strip with it: the
                             // tabs took clicks that did nothing, so the empty window had no way back to
@@ -533,6 +543,8 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
                     });
                 })
             });
+        // Where the row landed, so a peek of the commands starts under it rather than over it.
+        ui.data_mut(|d| d.insert_temp(peek_id.with("strip"), tabs.response.rect));
     };
     // The commands under the tab row. `peek_tab` is the tab they come from: during a peek it is not
     // the tab the window is on, so the tab is borrowed for the commands alone and the rest of the
@@ -681,6 +693,11 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
     // ribbon that dropped it, so following it down must not close both) or, auto-hidden, with the
     // pointer pushed to the top of the window.
     let display = app.ui.ribbon_display;
+    // Focus dropped its ribbon on purpose and takes it away with a click, so it shows the whole
+    // ribbon whatever the window's setting says: that one is about the room the ribbon takes in a
+    // layout Focus doesn't have. The peek still remembers the setting itself, so leaving Focus
+    // isn't mistaken for the frame a change lands in.
+    let shown = if app.focus_ribbon { RibbonDisplay::Commands } else { display };
     let last_display = ui.data(|d| d.get_temp::<RibbonDisplay>(peek_id.with("display")));
     ui.data_mut(|d| d.insert_temp(peek_id.with("display"), display));
     let (on_tab, last, allowed, hover, shown_tab) = ui.data(|d| {
@@ -698,7 +715,7 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
         pointer.is_some_and(|p| ui.ctx().layer_id_at(p).is_some_and(|l| matches!(l.order, egui::Order::Middle | egui::Order::Foreground)));
     // Only auto-hide reads the top band: a ribbon showing its tabs keeps the strip on screen, where
     // a tab is what peeks, and the strip's top pixels are the tab row's own.
-    let at_edge = display == RibbonDisplay::AutoHide && at_top(pointer, ui.max_rect().top());
+    let at_edge = shown == RibbonDisplay::AutoHide && at_top(pointer, ui.max_rect().top());
     let (peek, allowed) = peek_state(last_display != Some(display), on_tab || over_shown || over_menu || at_edge, allowed);
     ui.data_mut(|d| {
         d.insert_temp(peek_id.with("allowed"), allowed);
@@ -718,8 +735,10 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
     if peek && !want.is_empty() && want != "File" && !app.ui.backstage && want != app.ui.tab {
         peek_tab = Some(want.to_string());
     }
-    let at = ui.max_rect();
-    match place(display, peek) {
+    // The room the ribbon would take: the panels above it (the title bar) reserve their own as they
+    // are drawn, which the ui's rect does not show, so a peek is placed against what is left here.
+    let room = ui.available_rect_before_wrap();
+    match place(shown, peek) {
         // Word's auto-hide: nothing of the ribbon is on screen, and the page takes the room.
         Place::Hidden => {}
         Place::Full => {
@@ -731,10 +750,15 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
         // of pushing it back.
         Place::StripPeek => {
             draw_tabs(app, ui);
+            // Straight under the row that was just drawn, wherever it landed.
+            let strip = ui
+                .data(|d| d.get_temp::<Rect>(peek_id.with("strip")))
+                .filter(|r| r.is_positive())
+                .unwrap_or(Rect::from_min_size(room.min, vec2(room.width(), TABS_H)));
             let shown =
-                egui::Area::new(peek_id.with("peek")).fixed_pos(pos2(at.left(), at.top() + TABS_H)).order(egui::Order::Middle).show(ui.ctx(), |ui| {
-                    ui.set_width(at.width());
-                    ui.set_max_width(at.width());
+                egui::Area::new(peek_id.with("peek")).fixed_pos(pos2(room.left(), strip.bottom())).order(egui::Order::Middle).show(ui.ctx(), |ui| {
+                    ui.set_width(room.width());
+                    ui.set_max_width(room.width());
                     draw_commands(app, ui, peek_tab);
                 });
             ui.data_mut(|d| d.insert_temp(peek_id.with("shown"), shown.response.rect));
@@ -742,9 +766,9 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
         // Auto-hidden, the whole ribbon comes down over the page. Its place is what the next frame
         // measures the pointer against, so moving down from the top band into it keeps it open.
         Place::Reveal => {
-            let shown = egui::Area::new(peek_id.with("peek")).fixed_pos(at.min).order(egui::Order::Middle).show(ui.ctx(), |ui| {
-                ui.set_width(at.width());
-                ui.set_max_width(at.width());
+            let shown = egui::Area::new(peek_id.with("peek")).fixed_pos(room.min).order(egui::Order::Middle).show(ui.ctx(), |ui| {
+                ui.set_width(room.width());
+                ui.set_max_width(room.width());
                 draw_tabs(app, ui);
                 draw_commands(app, ui, peek_tab);
             });

@@ -233,6 +233,47 @@ fn focus_hides_the_chrome_drops_the_ribbon_and_esc_leaves() {
     assert!(h.query_by_label("Insert").is_some(), "Full Screen keeps the ribbon");
 }
 
+/// #1678 with Word's Ribbon Display Options: Focus's "⋯" drops the whole ribbon whatever the
+/// window's setting says — with auto-hide there would otherwise be nothing to drop — and the
+/// dropped ribbon carries neither the pin nor the display menu, since what those set is the window's
+/// layout, which Focus takes away. That also leaves one control named "Hide the ribbon" on screen
+/// rather than two, and leaves the setting itself alone.
+#[test]
+fn focus_drops_the_whole_ribbon_and_no_display_buttons() {
+    let mut a = app();
+    a.run("text.insert", json!({"text": "Hello"})).unwrap();
+    let mut h = harness(a);
+    h.run_steps(4);
+    let buttons = |h: &egui_kittest::Harness<'_, WordApp>, label: &str| h.query_all_by_role_and_label(egui::accesskit::Role::Button, label).count();
+    let click = |h: &mut egui_kittest::Harness<'_, WordApp>, label: &str| {
+        h.query_all_by_role_and_label(egui::accesskit::Role::Button, label).next().unwrap_or_else(|| panic!("no {label} button")).click()
+    };
+    for display in ["autoHide", "tabs"] {
+        h.state_mut().run("ui.ribbonDisplay", json!({"value": display})).unwrap();
+        h.state_mut().run("view.focus", json!({})).unwrap();
+        h.run_steps(4);
+        assert!(h.query_by_label("Insert").is_none(), "Focus takes the chrome away, {display}");
+        click(&mut h, "Show the ribbon");
+        h.run_steps(4);
+        assert!(h.query_by_label("Insert").is_some(), "the dropped ribbon shows its tabs: {display}");
+        assert!(h.query_by_label("Bold").is_some(), "and its commands, whatever the window's setting: {display}");
+        assert_eq!(buttons(&h, "Hide the ribbon"), 1, "one control puts the dropped ribbon away: {display}");
+        assert_eq!(buttons(&h, "Ribbon Display Options"), 0, "the overlay sets nothing about the window's ribbon: {display}");
+        assert_eq!(h.state().ui.ribbon_display.code(), display, "and the setting is as it was: {display}");
+        click(&mut h, "Hide the ribbon");
+        h.run_steps(3);
+        assert!(h.query_by_label("Insert").is_none() && h.query_by_label("Bold").is_none(), "the bar puts the dropped ribbon away: {display}");
+        h.event(egui::Event::PointerMoved(egui::pos2(700.0, 600.0)));
+        h.run_steps(3);
+        h.state_mut().run("view.focus", json!({})).unwrap();
+        h.run_steps(4);
+    }
+    h.state_mut().run("ui.ribbonDisplay", json!({"value": "commands"})).unwrap();
+    h.run_steps(4);
+    assert_eq!(buttons(&h, "Ribbon Display Options"), 1, "back in the window, the menu is at the row's far end");
+    assert_eq!(buttons(&h, "Hide the ribbon"), 1, "and so is the pin");
+}
+
 /// #1678: Focus's dropped ribbon is a command, `ui.focusRibbon`, which "⋯" and a click on the
 /// page run; outside Focus it does nothing and never fails.
 #[test]
