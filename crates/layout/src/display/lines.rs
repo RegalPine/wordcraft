@@ -525,7 +525,8 @@ fn draw_label_and_hyphen(ctx: &LineContext<'_, '_, '_>, out: &mut Vec<Draw>) {
 
 /// The band over the text each bookmark covers (File › Options › Display › Highlight bookmarks):
 /// on screen only, under the glyphs, in one colour whatever the bookmark's name. A bookmark with
-/// no text between its marks gets a narrow block at its place, so it can still be found.
+/// no text between its marks gets a narrow block at its place, so it can still be found. The
+/// bookmarks a file keeps for its own fields are not in the ranges it walks (see `Marks`).
 fn bookmark_marks(ctx: &LineContext<'_, '_, '_>, out: &mut Vec<Draw>) {
     if !ctx.opts.bookmarks {
         return;

@@ -100,8 +100,9 @@ pub struct ViewState {
     /// Developer › Design Mode: every content control shows its frame and title.
     #[serde(default)]
     pub design_mode: bool,
-    /// View › Show › Bookmarks: the marks Word draws at each bookmark's start and end (on screen
-    /// only; never printed or exported). Names a program made (`_Toc…`, `_GoBack`) stay hidden.
+    /// View › Show › Bookmarks: the brackets Word draws around each bookmark a person named (`[` at
+    /// its start, `]` at its end, an I-beam over nothing), on screen only; never printed or
+    /// exported. Names a program made (`_Toc…`, `_GoBack`) stay hidden.
     #[serde(default)]
     pub show_bookmarks: bool,
     /// View › Window › Full Screen (F11): the window fills the screen (#980). The front end

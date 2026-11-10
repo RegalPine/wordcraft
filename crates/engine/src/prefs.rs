@@ -48,7 +48,9 @@ pub struct Prefs {
     /// Formatting marks shown even while Show/Hide ¶ is off.
     pub marks: wordcraft_layout::display::FormattingMarks,
     /// Paint a band over the text each bookmark covers, on screen only. On by default, as Word's
-    /// own "Show bookmarks" is; the marks a file carries are otherwise hard to find.
+    /// own "Show bookmarks" is; the marks a file carries are otherwise hard to find. The ones a
+    /// program made for itself (`_Toc…`, `_GoBack`) are never banded — View › Show › Bookmarks
+    /// brackets those a person named.
     #[serde(default = "on")]
     pub highlight_bookmarks: bool,
     /// Mark grammar errors as you type (with Check spelling as you type on).

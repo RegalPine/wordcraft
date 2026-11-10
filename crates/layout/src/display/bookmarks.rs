@@ -1,4 +1,6 @@
-//! Where the text a bookmark covers sits in each paragraph, for the band drawn over it.
+//! Where the text a bookmark covers sits in each paragraph, for the band drawn over it. Only the
+//! bookmarks a person named are banded; the ones a program made for itself (`_Toc…`) are left out,
+//! as Word's own marks leave them out.
 
 use std::cell::OnceCell;
 
@@ -14,6 +16,12 @@ pub(crate) const BOOKMARK_COLOR: Rgb = Rgb(0xD2, 0xEC, 0xF2);
 /// How wide the mark for a bookmark that covers no text is: a point has nothing to stretch over,
 /// so it gets a narrow block at its place instead.
 pub(crate) const POINT_W: f32 = 3.0;
+
+/// A bookmark a program made for itself (`_Toc…`, `_Ref…`, `_GoBack`) rather than a person: its
+/// name starts with an underscore, as in Word's own list, and it is left out of the band.
+fn hidden(name: &str) -> bool {
+    name.starts_with('_')
+}
 
 /// Most bookmark ranges one drawing keeps, and most bookmarks it pairs at once. Both come from
 /// the file, so a document with more is marked up to the cap and left at that.
@@ -79,6 +87,9 @@ fn ranges(doc: &Document, story: StoryRef, left: &mut usize) -> HashMap<Path, Ve
             }
             match o {
                 InlineObject::BookmarkStart { name } => {
+                    if hidden(name) {
+                        continue;
+                    }
                     if open.len() < MAX {
                         // The bookmark's text begins after the mark that opens it.
                         let from = off.saturating_add(OBJ.len_utf8());
@@ -89,7 +100,11 @@ fn ranges(doc: &Document, story: StoryRef, left: &mut usize) -> HashMap<Path, Ve
                 InlineObject::BookmarkEnd { name } => {
                     // An end closes the earliest start of its name still open, as Word pairs them.
                     // One with no start in this story (a file holding only the end, or a start
-                    // past the cap) marks from the paragraph's start, as a comment's does.
+                    // past the cap) marks from the paragraph's start, as a comment's does. A
+                    // hidden bookmark's end is skipped with its start, so it never marks from 0.
+                    if hidden(name) {
+                        continue;
+                    }
                     let from = match open.iter().position(|(n, _)| n == name) {
                         Some(i) => {
                             open.remove(i);
@@ -197,6 +212,22 @@ mod tests {
         let mut d = body(1, "abcd");
         mark(&mut d, 0, &[(2, end("gone"))]);
         assert_eq!(ranges_of(&d, 0), vec![(0, 2)], "as a comment without its start does");
+    }
+
+    /// A program's own bookmark (`_Toc…`) is not what a person marked up, so it is left out of the
+    /// band, as Word's own marks leave it out. Its end goes with its start, so it never marks the
+    /// paragraph from its beginning the way an unmatched end would.
+    #[test]
+    fn a_hidden_bookmark_is_not_banded() {
+        let mut d = body(2, "abcd");
+        mark(&mut d, 0, &[(3, end("_Toc1")), (2, start("_Toc1"))]);
+        mark(&mut d, 1, &[(1, start("_Toc2"))]);
+        assert!(ranges_of(&d, 0).is_empty(), "an underscore name draws no band");
+        assert!(ranges_of(&d, 1).is_empty(), "nor does one that no end closes");
+        // The text is now `a b [start]c[end]d`, each mark three bytes: a bookmark a person names
+        // over the `d` is banded as it was before.
+        mark(&mut d, 0, &[(10, end("mine")), (9, start("mine"))]);
+        assert_eq!(ranges_of(&d, 0), vec![(12, 13)], "a name a person chose is banded as before");
     }
 
     /// A file carrying more bookmarks than the drawing keeps is marked up to the cap and left

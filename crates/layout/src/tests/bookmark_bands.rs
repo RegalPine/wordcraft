@@ -123,18 +123,19 @@ fn a_point_bookmark_gets_a_narrow_block() {
     assert!((b[0].0 - x).abs() < 0.5, "at the place the bookmark names: {b:?} over {x}");
 }
 
-/// The names a file keeps for its own fields, starting with an underscore, are banded like the
-/// ones a person made: they are what a table of contents is built from.
+/// The names a file keeps for its own fields, starting with an underscore, are not banded: Word
+/// leaves them out of its marks, and a table of contents would otherwise band every heading.
 #[test]
-fn hidden_bookmarks_are_banded_like_the_rest() {
+fn hidden_bookmarks_draw_no_band() {
     crate::test_fonts();
     let mut d = Document::from_text("Chapter one");
     mark(&mut d, 0, 0, 0, 7, "_Toc12345");
     let l = lay(&d);
+    assert!(bands(&d, &l, true).is_empty(), "an underscore name is the program's, not banded");
+    mark(&mut d, 0, 0, 0, 7, "Chapter");
+    let l = lay(&d);
     let b = bands(&d, &l, true);
-    assert_eq!(b.len(), 1, "an underscore name is marked up as any other");
-    let (x, w) = span(&l, 0, OBJ_W, 7 + OBJ_W);
-    assert!((b[0].0 - x).abs() < 0.5 && (b[0].1 - w).abs() < 0.5, "over `Chapter`: {b:?} over {x}..{}", x + w);
+    assert_eq!(b.len(), 1, "and the name a person chose beside it still is");
 }
 
 /// Two bookmarks over the same text paint one band, not a darker one where they cross.

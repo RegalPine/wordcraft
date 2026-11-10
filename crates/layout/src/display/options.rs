@@ -44,6 +44,8 @@ pub struct DisplayOptions {
     pub placeholders: bool,
     /// Paint a band over the text each bookmark covers (File › Options › Display). On screen
     /// only: like the placeholders it is a marker for the person editing, not part of the page.
+    /// The names a file keeps for its own fields (`_Toc…`, `_GoBack`) are left out, as Word leaves
+    /// them out of its own marks.
     pub bookmarks: bool,
     /// Review › Hide Ink: leave ink strokes out (they stay in the document).
     pub hide_ink: bool,

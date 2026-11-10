@@ -887,6 +887,8 @@ MATH glyphs that reference the same construction now share its immutable variant
 
 ## Revision history
 
+> 2026-11-10 · Progress log: bookmarks show as Word shows them - View ▸ Show ▸ Bookmarks brackets each bookmark a person named, `[` at its start and `]` at its end, an I-beam where it covers no text, and the pale band under File ▸ Options ▸ Display leaves out the names a file keeps for its own fields (`_Toc…`, `_Ref…`, `_GoBack`); readiness estimates unchanged.
+>
 > 2026-11-10 · Progress log: the browser build fetches a Chinese, Japanese or Korean face from beside the page while the screen still needs it, once per writing system per visit; readiness estimates unchanged.
 >
 > 2026-11-10 · Progress log: the text a bookmark covers is banded on screen, with the switch in File ▸ Options ▸ Display and nothing of it in a print, PDF or page image; readiness estimates unchanged.

@@ -330,7 +330,7 @@ fn display(app: &mut WordApp, ui: &mut Ui) {
     let mut bands = app.session.prefs.highlight_bookmarks;
     if ui
         .checkbox(&mut bands, tl!("Highlight the text bookmarks cover"))
-        .on_hover_text(tl!("A pale band over each bookmark's text, the names a file keeps for its own fields included. On screen only: prints, PDFs and page images never show it."))
+        .on_hover_text(tl!("A pale band over the text of the bookmarks you named; the names a file keeps for its own fields are left out. View › Show › Bookmarks brackets them instead. On screen only: prints, PDFs and page images never show it."))
         .changed()
     {
         set(app, json!({ "highlightBookmarks": bands }));
