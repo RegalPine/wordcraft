@@ -16,6 +16,8 @@ mod files;
 #[cfg(test)]
 pub(crate) use files::suggested_stem;
 mod fonts;
+#[cfg(test)]
+pub(crate) use fonts::{MAX_DOCUMENT_CJK, MAX_INTERFACE_CJK, cjk_system};
 mod frame;
 mod input;
 mod pictures;
@@ -121,6 +123,7 @@ impl WordApp {
             fonts_system_cjk: false,
             fonts_system_arabic: false,
             want_system_cjk: false,
+            cjk_fetched: 0,
             want_system_arabic: false,
             recover_fonts_for: None,
             recent_fonts_for: Vec::new(),

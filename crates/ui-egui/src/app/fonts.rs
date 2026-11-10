@@ -1,5 +1,12 @@
 use super::{QUIT, WordApp, i18n, theme};
 
+/// The most interface CJK characters looked at for a face the app doesn't have: enough to notice
+/// one is missing, few enough that asking costs nothing. The interface catalogs hold thousands.
+pub(crate) const MAX_INTERFACE_CJK: usize = 256;
+/// The most CJK characters of the document looked at, for the same reason. Whichever face answers
+/// the first of them answers the rest of its writing system.
+pub(crate) const MAX_DOCUMENT_CJK: usize = 256;
+
 impl WordApp {
     /// Fonts were added or removed (a command, the web shell loading stored fonts): lay out
     /// again and refresh the font lists and their previews.
@@ -12,6 +19,9 @@ impl WordApp {
         self.font_generation = generation;
         self.session.relayout();
         self.previews.fonts_changed();
+        // The interface is built from the fonts loaded when it was last styled: a face that only
+        // arrived now (a fetched CJK font, an added one) has to be installed there too.
+        self.styled = false;
         ctx.request_repaint();
     }
 
@@ -174,6 +184,11 @@ impl WordApp {
                     }
                 }
             }
+            for face in self.web_cjk_faces(lang) {
+                if !faces.iter().any(|f| f.id() == face.id()) {
+                    faces.push(face);
+                }
+            }
             theme::install_fonts_language_arabic(
                 ctx,
                 lang.prefers_hans(),
@@ -201,5 +216,112 @@ impl WordApp {
             });
             self.styled = true;
         }
+    }
+
+    /// Web: the CJK faces the site's files brought into the font database, and the ask for the
+    /// writing system still missing one. The browser has no font folders for the desktop's read of
+    /// an installed CJK font, and the web binary embeds none (its size stays in the download every
+    /// visitor pays for), so a Chinese, Japanese or Korean screen is boxes until a fetched face
+    /// answers. Desktop hosts leave [`crate::Services::fetch_cjk_font`] unset: this answers empty there
+    /// and the interface fonts stay exactly as they were.
+    pub(crate) fn web_cjk_faces(&mut self, lang: i18n::Lang) -> Vec<std::sync::Arc<wordcraft_fonts::FontFace>> {
+        if self.services.fetch_cjk_font.is_none() {
+            return Vec::new();
+        }
+        let db = wordcraft_fonts::FontDb::global();
+        let needed = self.needed_cjk(lang);
+        let mut faces: Vec<std::sync::Arc<wordcraft_fonts::FontFace>> = Vec::new();
+        let mut missing = false;
+        for c in &needed {
+            match db.fallback_for(*c, u32::MAX) {
+                Some(face) => {
+                    if !faces.iter().any(|f| f.id() == face.id()) {
+                        faces.push(face);
+                    }
+                }
+                None => missing = true,
+            }
+        }
+        // One trip to the site's files per writing system per visit: a site that carries none can
+        // only show boxes, and asking again every frame would fetch the same answer.
+        let system = cjk_system(lang, &needed);
+        if missing
+            && self.take_cjk_ask(system)
+            && let Some(fetch) = &self.services.fetch_cjk_font
+        {
+            fetch(system);
+        }
+        faces
+    }
+
+    /// Records the ask for `system` and answers whether it should go out now: once per writing
+    /// system per visit. Switching between two CJK screens asks for each of them once, and never
+    /// again, whether or not the site answered.
+    pub(crate) fn take_cjk_ask(&mut self, system: crate::CjkSystem) -> bool {
+        let bit = system.bit();
+        if self.cjk_fetched & bit != 0 {
+            return false;
+        }
+        self.cjk_fetched |= bit;
+        true
+    }
+
+    /// The CJK characters this screen has to draw: the interface text of the CJK languages sharing
+    /// `lang`'s writing system and every language's own name (what the desktop checks its embedded
+    /// faces against, #486) when the interface is CJK or shows CJK names, then the document's own.
+    /// Deduplicated and bounded, so a document of nothing but hanzi costs the same as a sentence.
+    pub(crate) fn needed_cjk(&self, lang: i18n::Lang) -> Vec<char> {
+        let mut out: Vec<char> = Vec::new();
+        if lang.uses_cjk() || self.want_system_cjk {
+            let (catalogs, names) = i18n::Lang::cjk_font_text_for(lang.prefers_hans(), lang.prefers_korean());
+            push_cjk(&mut out, catalogs.iter().flat_map(|t| t.chars()));
+            push_cjk(&mut out, names.chars());
+        }
+        push_cjk(&mut out, self.session.doc.plain_text(wordcraft_doc::StoryRef::Body).chars());
+        out
+    }
+}
+
+/// Keep the CJK characters of `chars`, once each, until the bound [`needed_cjk`] works to is hit.
+fn push_cjk(out: &mut Vec<char>, chars: impl Iterator<Item = char>) {
+    for c in chars.filter(|c| wordcraft_fonts::is_cjk(*c)) {
+        if out.len() >= MAX_INTERFACE_CJK + MAX_DOCUMENT_CJK {
+            break;
+        }
+        if !out.contains(&c) {
+            out.push(c);
+        }
+    }
+}
+
+/// The writing system the CJK the screen has to draw belongs to: what the interface language
+/// prefers or, in another language, what the characters themselves say. Hangul means Korean and
+/// kana means Japanese; hanzi alone take the Simplified order, which is what the desktop keeps
+/// when no Traditional Chinese font is installed.
+pub(crate) fn cjk_system(lang: i18n::Lang, needed: &[char]) -> crate::CjkSystem {
+    if lang.prefers_hant() {
+        return crate::CjkSystem::Hant;
+    }
+    if lang.prefers_korean() {
+        return crate::CjkSystem::Korea;
+    }
+    if lang.prefers_hans() {
+        return crate::CjkSystem::Hans;
+    }
+    if lang.uses_cjk() {
+        return crate::CjkSystem::Japan;
+    }
+    let mut korean = false;
+    let mut japanese = false;
+    for &c in needed {
+        korean |= (c as u32) >= 0xAC00 && (c as u32) <= 0xD7AF;
+        japanese |= (c as u32) >= 0x3040 && (c as u32) <= 0x30FF;
+    }
+    if korean {
+        crate::CjkSystem::Korea
+    } else if japanese {
+        crate::CjkSystem::Japan
+    } else {
+        crate::CjkSystem::Hans
     }
 }
