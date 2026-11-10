@@ -1149,10 +1149,18 @@ fn the_pin_collapses_the_ribbon_and_a_hovered_tab_peeks_it_open() {
     let commands =
         |h: &egui_kittest::Harness<'_, WordApp>, label: &str| h.query_all_by_role_and_label(egui::accesskit::Role::Button, label).next().is_some();
     let tab = h.get_by_label("Insert").rect().center();
+    let strip = h.get_by_label("Insert").rect();
+    let page_top = |h: &egui_kittest::Harness<'_, WordApp>| h.state().canvas.viewport.map(|v| v.min.y).unwrap_or_default();
+    let page = page_top(&h);
     h.event(egui::Event::PointerMoved(tab));
     h.run_steps(4);
     assert!(commands(&h, "Bookmark"), "a hovered tab peeks its own commands");
     assert!(!commands(&h, "Bold"), "and not the commands of the tab the window is on");
+    // The peek drops under the tab row, which stays on screen, and covers the page instead of
+    // pushing it down, as Word's does.
+    assert!(strip.bottom() - 1.0 <= button(&h, "Bookmark").top(), "the peek starts under the tab row: {strip:?} vs {:?}", button(&h, "Bookmark"));
+    assert_eq!(page_top(&h), page, "the page keeps the room the strip leaves, peek or no peek");
+    assert!(h.query_by_label("Insert").is_some(), "the tab row stays put under the peek");
     // Following them down keeps them…
     let bookmark = button(&h, "Bookmark").center();
     h.event(egui::Event::PointerMoved(bookmark));
@@ -1219,7 +1227,17 @@ fn the_ribbon_display_options_menu_hides_the_tabs_and_the_top_of_the_window_brin
     let commands =
         |h: &egui_kittest::Harness<'_, WordApp>, label: &str| h.query_all_by_role_and_label(egui::accesskit::Role::Button, label).next().is_some();
     let page = |h: &egui_kittest::Harness<'_, WordApp>| h.state().canvas.viewport.map(|v| v.min.y).unwrap_or_default();
-    let options = h.get_by_label("Ribbon Display Options").rect();
+    // The arrow by its button, not by its label: hovering it adds the tooltip's own node.
+    let arrow = |h: &egui_kittest::Harness<'_, WordApp>| {
+        h.query_all_by_role_and_label(egui::accesskit::Role::Button, "Ribbon Display Options")
+            .next()
+            .expect("the Ribbon Display Options arrow")
+            .rect()
+    };
+    let click_arrow = |h: &mut egui_kittest::Harness<'_, WordApp>| {
+        h.query_all_by_role_and_label(egui::accesskit::Role::Button, "Ribbon Display Options").next().unwrap().click()
+    };
+    let options = arrow(&h);
     let pin = h.get_by_label("Hide the ribbon").rect();
     assert!(
         (options.center().y - pin.center().y).abs() < 1.0 && options.right() > pin.right(),
@@ -1228,7 +1246,7 @@ fn the_ribbon_display_options_menu_hides_the_tabs_and_the_top_of_the_window_brin
     let full = page(&h);
     assert!(commands(&h, "Bold"), "the ribbon shows its tabs and its commands");
     // Auto Hide Ribbon: the whole ribbon goes, and the page takes its room.
-    h.get_by_label("Ribbon Display Options").click();
+    click_arrow(&mut h);
     h.run_steps(3);
     h.get_by_label("Auto Hide Ribbon").click();
     h.run_steps(4);
@@ -1243,12 +1261,15 @@ fn the_ribbon_display_options_menu_hides_the_tabs_and_the_top_of_the_window_brin
     assert!(h.query_by_label("Insert").is_some(), "the top band reveals the tabs");
     assert!(commands(&h, "Bold"), "and the commands under them");
     assert_eq!(page(&h), hidden, "the revealed ribbon covers the page: {} vs {hidden}", page(&h));
+    // It takes the ribbon's own place, not the title bar's: the row sits where it sat when shown.
+    let revealed = h.get_by_label("Insert").rect();
+    assert!((revealed.center().y - options.center().y).abs() < 1.0, "the revealed row is where the shown one was: {revealed:?}");
     // Following it down stays inside the ribbon, so the arrow can be reached again.
     h.event(egui::Event::PointerMoved(pos2(options.center().x, options.center().y)));
     h.run_steps(4);
     assert!(h.query_by_label("Insert").is_some(), "moving down into the revealed ribbon keeps it open");
     // Show Tabs: the row comes back into the layout, the commands stay away.
-    h.get_by_label("Ribbon Display Options").click();
+    click_arrow(&mut h);
     h.run_steps(3);
     h.get_by_label("Show Tabs").click();
     h.run_steps(4);

@@ -86,6 +86,14 @@ pub struct Services {
     pub forget_font: Option<Box<dyn Fn(&str)>>,
     /// Web: request browser to query and load local installed fonts (`window.queryLocalFonts()`).
     pub load_system_fonts: Option<Box<dyn Fn()>>,
+    /// Web: fetch the CJK face the site keeps beside the app for one writing system, so Chinese,
+    /// Japanese and Korean text has glyphs. The browser has no font folders for the desktop's lazy
+    /// system fallback to read, and the web binary embeds no CJK face (the smallest is several MB,
+    /// kept out of the download every visitor pays for), so text in those scripts is boxes until
+    /// this brings a face in. The host installs it through the font database, which the app notices
+    /// the way it notices an added font. Asked at most once per [`CjkSystem`] per visit, and only
+    /// when the hook is there: desktop builds leave it `None` and read the installed fonts instead.
+    pub fetch_cjk_font: Option<Box<dyn Fn(CjkSystem)>>,
     /// Desktop: File › Options › General › Make WordCraft the default for Word documents (#295),
     /// only from that button (never a programmatic command). Windows opens the Settings app's
     /// Default apps page (apps can't set defaults themselves); Linux and BSD set it with
@@ -107,6 +115,70 @@ pub struct Services {
 
 /// Files delivered asynchronously.
 pub type Inbox = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
+
+/// The CJK writing system whose face [`Services::fetch_cjk_font`] asks the site for. The ids are
+/// the ones the site's font index lists its files by, so a host and a packager agree without
+/// sharing code.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CjkSystem {
+    /// Simplified Chinese, the mainland standard.
+    Hans,
+    /// Traditional Chinese, the Taiwan standard. A site with only a Simplified face is answered
+    /// with it, as the desktop is when no Traditional font is installed.
+    Hant,
+    /// Japanese.
+    Japan,
+    /// Korean.
+    Korea,
+}
+
+impl CjkSystem {
+    /// The id this system is listed by in the site's font index.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CjkSystem::Hans => "hans",
+            CjkSystem::Hant => "hant",
+            CjkSystem::Japan => "jpan",
+            CjkSystem::Korea => "kore",
+        }
+    }
+
+    /// The system an index entry names. An unknown id is no system at all, so an index written by
+    /// a newer packager still answers the systems this build knows.
+    pub fn from_id(id: &str) -> Option<Self> {
+        match id {
+            "hans" => Some(CjkSystem::Hans),
+            "hant" => Some(CjkSystem::Hant),
+            "jpan" => Some(CjkSystem::Japan),
+            "kore" => Some(CjkSystem::Korea),
+            _ => None,
+        }
+    }
+
+    /// The systems to try for this one, best first: Traditional Chinese falls back to the
+    /// Simplified face, Japanese and Korean to nothing else (their ideographs are their own
+    /// subset of the same range, and a wrong standard's shapes are worse than a box).
+    pub fn fallbacks(self) -> &'static [CjkSystem] {
+        match self {
+            CjkSystem::Hant => &[CjkSystem::Hant, CjkSystem::Hans],
+            CjkSystem::Hans => &[CjkSystem::Hans],
+            CjkSystem::Japan => &[CjkSystem::Japan],
+            CjkSystem::Korea => &[CjkSystem::Korea],
+        }
+    }
+
+    /// This system's bit in a set of asked systems, for a host that remembers which ones it has
+    /// already gone to the site for ([`Services::fetch_cjk_font`]). There are four of them, so the
+    /// set fits in one byte.
+    pub fn bit(self) -> u8 {
+        match self {
+            CjkSystem::Hans => 1,
+            CjkSystem::Hant => 2,
+            CjkSystem::Japan => 4,
+            CjkSystem::Korea => 8,
+        }
+    }
+}
 
 /// [`Services::host_save`]: `(file name, bytes, save_as)`. An error means the page didn't get
 /// the file, and the save failed.

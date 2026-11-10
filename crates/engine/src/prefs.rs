@@ -47,6 +47,10 @@ pub struct Prefs {
     pub user_templates_folder: Option<String>,
     /// Formatting marks shown even while Show/Hide ¶ is off.
     pub marks: wordcraft_layout::display::FormattingMarks,
+    /// Paint a band over the text each bookmark covers, on screen only. On by default, as Word's
+    /// own "Show bookmarks" is; the marks a file carries are otherwise hard to find.
+    #[serde(default = "on")]
+    pub highlight_bookmarks: bool,
     /// Mark grammar errors as you type (with Check spelling as you type on).
     pub mark_grammar: bool,
     /// Check spelling as you type (File › Options › Proofing). The live value is
@@ -79,6 +83,7 @@ impl Default for Prefs {
             dictionaries_folder: None,
             user_templates_folder: None,
             marks: Default::default(),
+            highlight_bookmarks: true,
             mark_grammar: true,
             check_spelling: true,
             read_page_color: Default::default(),
@@ -103,6 +108,12 @@ impl Prefs {
     }
 }
 
+/// The spelling of an on/off preference whose absence means on: preferences saved before the
+/// setting existed read as it reads now, not as off.
+fn on() -> bool {
+    true
+}
+
 /// Ignore malformed saved language tags without discarding the other preferences.
 fn lenient_default_language<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
     let value = serde_json::Value::deserialize(d)?;
@@ -124,6 +135,17 @@ fn lenient_read_page_color<'de, D: serde::Deserializer<'de>>(d: D) -> Result<cra
 mod tests {
     use super::Prefs;
     use crate::cmd::view::ReadPageColor;
+
+    /// The band over bookmarked text is on until the person turns it off: preferences saved
+    /// before the setting existed read as it reads now, not as off.
+    #[test]
+    fn bookmark_banding_reads_on_from_older_preferences() {
+        assert!(Prefs::default().highlight_bookmarks, "on from the start");
+        let old: Prefs = serde_json::from_str(r#"{"checkSpelling":false}"#).unwrap();
+        assert!(old.highlight_bookmarks, "and still on in preferences saved without the key");
+        let off: Prefs = serde_json::from_str(r#"{"highlightBookmarks":false,"checkSpelling":false}"#).unwrap();
+        assert!(!off.highlight_bookmarks, "and the choice to hide it is read back");
+    }
 
     #[test]
     fn read_page_color_loads_from_old_and_damaged_prefs() {

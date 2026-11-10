@@ -1,3 +1,4 @@
+use super::bookmarks::{BOOKMARK_COLOR, Marks, POINT_W};
 use super::glyphs::{Authors, check_box, text_color, upright_in_vertical};
 use super::objects::{graphic_draws, inline_rect, object_draws, spun};
 use super::options::DisplayOptions;
@@ -25,6 +26,7 @@ pub(super) struct LineRender<'a, 'authors, 'author_doc> {
     pub origin: (f32, f32),
     pub opts: &'a DisplayOptions,
     pub authors: &'authors Authors<'author_doc>,
+    pub marks: &'a Marks<'a>,
     pub alpha: f32,
     pub down: bool,
 }
@@ -43,6 +45,7 @@ struct LineContext<'a, 'authors, 'author_doc> {
     bottom: f32,
     opts: &'a DisplayOptions,
     authors: &'authors Authors<'author_doc>,
+    marks: &'a Marks<'a>,
     alpha: f32,
     down: bool,
     auto: Option<Rgb>,
@@ -58,7 +61,7 @@ impl LineContext<'_, '_, '_> {
 }
 
 pub(super) fn lines(input: LineRender<'_, '_, '_>, out: &mut Vec<Draw>) {
-    let LineRender { doc, story, path, pl, range, origin: (x, y), opts, authors, alpha, down } = input;
+    let LineRender { doc, story, path, pl, range, origin: (x, y), opts, authors, marks, alpha, down } = input;
     let (l0, l1) = (range.start, range.end);
     let Some(first) = pl.lines.get(l0) else { return };
     let para = doc.para(story, path);
@@ -72,9 +75,10 @@ pub(super) fn lines(input: LineRender<'_, '_, '_>, out: &mut Vec<Draw>) {
         let top = y + (line.top - first.top);
         let base = top + (line.baseline - line.top);
         let bottom = top + line.height;
-        let ctx = LineContext { doc, story, path, pl, para, line, li, x, top, base, bottom, opts, authors, alpha, down, auto };
+        let ctx = LineContext { doc, story, path, pl, para, line, li, x, top, base, bottom, opts, authors, marks, alpha, down, auto };
         comment_backgrounds(&ctx, out);
         character_backgrounds(&ctx, out);
+        bookmark_marks(&ctx, out);
         draw_label_and_hyphen(&ctx, out);
         draw_glyph_runs(&ctx, out);
         proofing_marks(&ctx, out);
@@ -517,6 +521,44 @@ fn draw_label_and_hyphen(ctx: &LineContext<'_, '_, '_>, out: &mut Vec<Draw>) {
             x_scale: style.rc.scale / 100.0,
         });
     }
+}
+
+/// The band over the text each bookmark covers (File › Options › Display › Highlight bookmarks):
+/// on screen only, under the glyphs, in one colour whatever the bookmark's name. A bookmark with
+/// no text between its marks gets a narrow block at its place, so it can still be found.
+fn bookmark_marks(ctx: &LineContext<'_, '_, '_>, out: &mut Vec<Draw>) {
+    if !ctx.opts.bookmarks {
+        return;
+    }
+    for &(start, end) in ctx.marks.para(ctx.story, ctx.path) {
+        if start >= end {
+            if start >= ctx.line.start
+                && start < ctx.line.stop
+                && let Some(x0) = ctx.pl.x_of(ctx.li, start)
+            {
+                bookmark_band(ctx, x0, x0 + POINT_W, out);
+            }
+            continue;
+        }
+        if end <= ctx.line.start || start >= ctx.line.stop {
+            continue;
+        }
+        for (x0, x1) in ctx.pl.x_spans(ctx.li, start.max(ctx.line.start), end.min(ctx.line.stop)) {
+            if x1 > x0 {
+                bookmark_band(ctx, x0, x1, out);
+            }
+        }
+    }
+}
+
+/// One stretch of that band across a line, from `x0` to `x1` of the paragraph's own coordinates.
+fn bookmark_band(ctx: &LineContext<'_, '_, '_>, x0: f32, x1: f32, out: &mut Vec<Draw>) {
+    out.push(Draw::Fill {
+        rect: Rect::new(ctx.x + x0, ctx.top, (x1 - x0).max(0.0), ctx.line.height),
+        color: BOOKMARK_COLOR,
+        alpha: ctx.alpha,
+        text_bg: false,
+    });
 }
 
 fn formatting_marks(ctx: &LineContext<'_, '_, '_>, out: &mut Vec<Draw>) {

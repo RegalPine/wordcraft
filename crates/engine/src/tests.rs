@@ -11748,6 +11748,25 @@ fn exported_page_images_draw_headers_at_full_strength() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The band over bookmarked text is the editor's cue, not part of the page: what leaves the app —
+/// a page image, a PDF, a print — builds its own display options and never asks for it.
+#[test]
+fn a_page_image_carries_no_bookmark_band() {
+    let mut s = s();
+    run(&mut s, "text.insert", json!({"text": "Hello brave world"}));
+    run(&mut s, "select.text", json!({"text": "brave"}));
+    run(&mut s, "insert.bookmark", json!({"name": "brave"}));
+    assert!(s.prefs.highlight_bookmarks, "on screen the text is banded by default");
+    let dir = std::env::temp_dir().join(format!("wordcraft-png-bookmark-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("p.png");
+    s.run("file.exportPng", &json!({"path": path.to_string_lossy(), "scale": 1.0})).unwrap();
+    let img = image::open(&path).unwrap().to_rgb8();
+    let band = [0xD2u8, 0xEC, 0xF2];
+    assert_eq!(img.pixels().filter(|p| p.0 == band).count(), 0, "the exported page shows no bookmark band");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Shape Format › Shape Fill with transparency and gradients (#1500): each form sets the fill of
 /// every selected shape in one undo step; a colour alone keeps the transparency; hostile values
 /// are clamped; the old `{"color"}` form still works.

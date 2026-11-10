@@ -1,3 +1,4 @@
+use super::bookmarks::Marks;
 use super::glyphs::{Authors, upright_east_asian};
 use super::lines::{LineRender, lines};
 use super::objects::{ShapeLook, effects_in, graphic_draws, object_draws, shape_draws, spun};
@@ -33,20 +34,22 @@ pub fn page_display(doc: &Document, page: &Page, opts: &DisplayOptions) -> Vec<D
     let mut out = Vec::new();
     let (ha, ba) = dimming(opts);
     let authors = Authors::new(doc);
-    stories_display(doc, &[&page.header[..], &page.footer[..]], None, opts, &authors, ha, &mut out);
-    stories_display(doc, &[&page.items[..]], None, opts, &authors, ba, &mut out);
+    let marks = Marks::new(doc);
+    stories_display(doc, &[&page.header[..], &page.footer[..]], None, opts, &authors, &marks, ha, &mut out);
+    stories_display(doc, &[&page.items[..]], None, opts, &authors, &marks, ba, &mut out);
     body_change_bars(doc, page, &page.items, opts, ba, &mut out);
     out
 }
 
 /// A page's draw items one placed item at a time, for a caller that draws and tags each item on
-/// its own (the PDF export). What every item shares, the revision authors' colours and the cells
-/// cut off at their edge, is worked out once for the page, not once for every item as calling
-/// [`page_display`] with each would (#3866).
+/// its own (the PDF export). What every item shares, the revision authors' colours, the places
+/// bookmarks cover and the cells cut off at their edge, is worked out once for the page, not once
+/// for every item as calling [`page_display`] with each would (#3866).
 pub struct ItemDisplay<'a> {
     doc: &'a Document,
     page: &'a Page,
     authors: Authors<'a>,
+    marks: Marks<'a>,
     clips: Clips,
     /// The page's text boxes (see [`text_frames`]): a turned one's lines are drawn turned.
     turned: Vec<(u32, Rect, Spin)>,
@@ -57,7 +60,7 @@ impl<'a> ItemDisplay<'a> {
         let cells: Vec<Placed> =
             page.header.iter().chain(&page.footer).chain(&page.items).filter(|c| matches!(c, Placed::Cell { clip: true, .. })).cloned().collect();
         let turned = [&page.items, &page.header, &page.footer].into_iter().flat_map(|items| text_frames(items)).collect();
-        ItemDisplay { doc, page, authors: Authors::new(doc), clips: clipped_cells(&cells), turned }
+        ItemDisplay { doc, page, authors: Authors::new(doc), marks: Marks::new(doc), clips: clipped_cells(&cells), turned }
     }
 
     /// The draw items of `it` alone, as [`page_display`] gives them for a page holding just it
@@ -66,7 +69,7 @@ impl<'a> ItemDisplay<'a> {
         let mut out = Vec::new();
         let items = std::slice::from_ref(it);
         let (_, ba) = dimming(opts);
-        stories_display(self.doc, &[items], Some(&self.clips), opts, &self.authors, ba, &mut out);
+        stories_display(self.doc, &[items], Some(&self.clips), opts, &self.authors, &self.marks, ba, &mut out);
         // A line of a turned text box turns with it (as `stories_display` turns them on a page).
         if let Some((_, rect, spin)) = turned_frame(&self.turned, it).and_then(|k| self.turned.get(k)) {
             let mut turned = Vec::new();
@@ -85,8 +88,9 @@ pub fn page_layers(doc: &Document, page: &Page, opts: &DisplayOptions) -> [(f32,
     let (ha, ba) = dimming(opts);
     let (mut hf, mut body) = (Vec::new(), Vec::new());
     let authors = Authors::new(doc);
-    stories_display(doc, &[&page.header[..], &page.footer[..]], None, opts, &authors, 1.0, &mut hf);
-    stories_display(doc, &[&page.items[..]], None, opts, &authors, 1.0, &mut body);
+    let marks = Marks::new(doc);
+    stories_display(doc, &[&page.header[..], &page.footer[..]], None, opts, &authors, &marks, 1.0, &mut hf);
+    stories_display(doc, &[&page.items[..]], None, opts, &authors, &marks, 1.0, &mut body);
     body_change_bars(doc, page, &page.items, opts, 1.0, &mut body);
     [(ha, hf), (ba, body)]
 }
@@ -105,12 +109,16 @@ fn body_change_bars(doc: &Document, page: &Page, items: &[Placed], opts: &Displa
 
 /// Draw items for the placed items of `stories`, faded by `a`.
 /// `shared` gives the page's clipped cells when the caller worked them out already.
+/// `authors` and `marks` are what the page works out once for every item it holds; they travel
+/// down the tree rather than being rebuilt for each one, which is why this takes eight arguments.
+#[allow(clippy::too_many_arguments)]
 fn stories_display(
     doc: &Document,
     stories: &[&[Placed]],
     shared: Option<&Clips>,
     opts: &DisplayOptions,
     authors: &Authors,
+    marks: &Marks,
     a: f32,
     out: &mut Vec<Draw>,
 ) {
@@ -140,7 +148,7 @@ fn stories_display(
                 && turned_frame(&frames, it).is_none()
             {
                 let mut inner = Vec::new();
-                item(doc, it, opts, authors, a, &mut inner);
+                item(doc, it, opts, authors, marks, a, &mut inner);
                 out.push(Draw::Clip { rect, items: inner });
                 continue;
             }
@@ -154,7 +162,7 @@ fn stories_display(
                     if let Some((_, rect, warp)) = warps.iter().find(|(w, ..)| w == id) {
                         let lines: Vec<&Placed> =
                             items.iter().filter(|i| matches!(i, Placed::Lines { story: StoryRef::Part(s), .. } if s == id)).collect();
-                        warped_text(WarpedText { doc, lines: &lines, rect: *rect, warp, opts, authors, alpha: a }, out);
+                        warped_text(WarpedText { doc, lines: &lines, rect: *rect, warp, opts, authors, marks, alpha: a }, out);
                     }
                 }
                 _ => match turned_frame(&frames, it) {
@@ -173,16 +181,16 @@ fn stories_display(
                                     && let Some(rect) = cell_clip(clips, *story, &path.0)
                                 {
                                     let mut clipped = Vec::new();
-                                    item(doc, line, opts, authors, a, &mut clipped);
+                                    item(doc, line, opts, authors, marks, a, &mut clipped);
                                     inner.push(Draw::Clip { rect, items: clipped });
                                 } else {
-                                    item(doc, line, opts, authors, a, &mut inner);
+                                    item(doc, line, opts, authors, marks, a, &mut inner);
                                 }
                             }
                             super::objects::spun(*spin, *rect, inner, out);
                         }
                     }
-                    None => item(doc, it, opts, authors, a, out),
+                    None => item(doc, it, opts, authors, marks, a, out),
                 },
             }
         }
@@ -225,13 +233,14 @@ pub fn object_display(doc: &Document, page: &Page, o: &InlineObject, rect: Rect,
     object_draws(o, rect, Spin::default(), 1.0, opts, &mut out);
     let Some(id) = text_box else { return out };
     let authors = Authors::new(doc);
+    let marks = Marks::new(doc);
     for items in [&page.items, &page.header, &page.footer] {
         let lines: Vec<&Placed> = items.iter().filter(|i| matches!(i, Placed::Lines { story: StoryRef::Part(s), .. } if *s == id)).collect();
         match warped_boxes(doc, items).into_iter().find(|(w, ..)| *w == id) {
             Some((_, rect, warp)) if !lines.is_empty() => {
-                warped_text(WarpedText { doc, lines: &lines, rect, warp: &warp, opts, authors: &authors, alpha: 1.0 }, &mut out)
+                warped_text(WarpedText { doc, lines: &lines, rect, warp: &warp, opts, authors: &authors, marks: &marks, alpha: 1.0 }, &mut out)
             }
-            _ => lines.into_iter().for_each(|it| item(doc, it, opts, &authors, 1.0, &mut out)),
+            _ => lines.into_iter().for_each(|it| item(doc, it, opts, &authors, &marks, 1.0, &mut out)),
         }
     }
     out
@@ -311,21 +320,22 @@ fn warped_boxes(doc: &Document, items: &[Placed]) -> Vec<(u32, Rect, wordcraft_d
 /// The text of a warped text box at `rect`: its lines' letters as outlines bent by `warp`, the
 /// box's text stretched over the frame inside its margins (as WordArt is). Underlines, marks and
 /// other decorations are left out; a warp that is drawn flat leaves the text as it is.
-struct WarpedText<'doc, 'opts, 'lines, 'placed, 'authors, 'author_doc> {
+struct WarpedText<'doc, 'opts, 'lines, 'placed, 'authors, 'author_doc, 'marks> {
     doc: &'doc Document,
     lines: &'lines [&'placed Placed],
     rect: Rect,
     warp: &'lines wordcraft_doc::wordart::TextWarp,
     opts: &'opts DisplayOptions,
     authors: &'authors Authors<'author_doc>,
+    marks: &'marks Marks<'doc>,
     alpha: f32,
 }
 
-fn warped_text(input: WarpedText<'_, '_, '_, '_, '_, '_>, out: &mut Vec<Draw>) {
-    let WarpedText { doc, lines, rect, warp, opts, authors, alpha } = input;
+fn warped_text(input: WarpedText<'_, '_, '_, '_, '_, '_, '_>, out: &mut Vec<Draw>) {
+    let WarpedText { doc, lines, rect, warp, opts, authors, marks, alpha } = input;
     let mut raw = Vec::new();
     for it in lines {
-        item(doc, it, opts, authors, alpha, &mut raw);
+        item(doc, it, opts, authors, marks, alpha, &mut raw);
     }
     // The letters: runs with effects as they are, plain runs from their glyphs.
     let mut arts: Vec<(BezPath, Box<wordcraft_doc::wordart::TextEffects>, Rgb, f32)> = Vec::new();
@@ -447,13 +457,15 @@ pub(super) fn char_box(b: &Border, x0: f32, x1: f32, top: f32, bottom: f32, alph
     out.push(rule(r, top, r, bottom, b, alpha));
 }
 
-fn item(doc: &Document, it: &Placed, opts: &DisplayOptions, authors: &Authors, alpha: f32, out: &mut Vec<Draw>) {
-    item_in(doc, it, opts, authors, alpha, Spin::default(), out)
+fn item(doc: &Document, it: &Placed, opts: &DisplayOptions, authors: &Authors, marks: &Marks, alpha: f32, out: &mut Vec<Draw>) {
+    item_in(doc, it, opts, authors, marks, alpha, Spin::default(), out)
 }
 
 /// [`item`] drawn inside the turn `outer` (a turned Drawing Canvas's members): a shape's
 /// effects follow all the turns it is drawn inside.
-fn item_in(doc: &Document, it: &Placed, opts: &DisplayOptions, authors: &Authors, alpha: f32, outer: Spin, out: &mut Vec<Draw>) {
+/// As with `stories_display`: the page's authors and bookmark marks are passed down, not rebuilt.
+#[allow(clippy::too_many_arguments)]
+fn item_in(doc: &Document, it: &Placed, opts: &DisplayOptions, authors: &Authors, marks: &Marks, alpha: f32, outer: Spin, out: &mut Vec<Draw>) {
     match it {
         Placed::Fill { rect, color } => out.push(Draw::Fill { rect: *rect, color: *color, alpha, text_bg: false }),
         Placed::Rule { x0, y0, x1, y1, border } => out.push(rule(*x0, *y0, *x1, *y1, border, alpha)),
@@ -489,7 +501,7 @@ fn item_in(doc: &Document, it: &Placed, opts: &DisplayOptions, authors: &Authors
         Placed::Clip { rect, spin, items } => {
             let mut inner = Vec::new();
             for it in items {
-                item_in(doc, it, opts, authors, alpha, spin.within(outer), &mut inner);
+                item_in(doc, it, opts, authors, marks, alpha, spin.within(outer), &mut inner);
             }
             spun(*spin, *rect, vec![Draw::Clip { rect: *rect, items: inner }], out)
         }
@@ -506,6 +518,7 @@ fn item_in(doc: &Document, it: &Placed, opts: &DisplayOptions, authors: &Authors
                     origin: (0.0, 0.0),
                     opts,
                     authors,
+                    marks,
                     alpha,
                     down: *turn == TextDirection::Down,
                 },
@@ -523,7 +536,7 @@ fn item_in(doc: &Document, it: &Placed, opts: &DisplayOptions, authors: &Authors
             out.push(Draw::Turned { x: *x, y: *y, turn: *turn, items });
         }
         Placed::Lines { story, path, para, l0, l1, x, y, .. } => {
-            lines(LineRender { doc, story: *story, path, pl: para, range: *l0..*l1, origin: (*x, *y), opts, authors, alpha, down: false }, out)
+            lines(LineRender { doc, story: *story, path, pl: para, range: *l0..*l1, origin: (*x, *y), opts, authors, marks, alpha, down: false }, out)
         }
     }
 }

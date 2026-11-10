@@ -8,6 +8,7 @@ static site in `wordcraft-web-<version>/`:
 | `index.html` | The page. It loads everything through relative URLs. |
 | `wordcraft-web-<hash>.js` | wasm-bindgen glue (generated, ES module) |
 | `wordcraft-web-<hash>_bg.wasm` | The app, about 13 MB, or 5 MB with compression |
+| `fonts/cjk/v<version>/` | The Chinese, Japanese and Korean faces the page fetches on demand. Only when the build had `CRAFT_FONTS_DIR` (the releases do); see below |
 | `_headers`, `.htaccess` | Sample header rules for Netlify/Cloudflare Pages and Apache |
 
 There is no server-side code. Upload the folder's contents anywhere that serves static files.
@@ -49,6 +50,31 @@ location /wordcraft/ {
 ```
 
 Local test: `python3 -m http.server 8765` inside the folder, then open http://localhost:8765/.
+
+## Chinese, Japanese and Korean
+
+The wasm embeds no CJK font: the smallest one is several megabytes and every visitor would pay for
+it in the download. A browser also has no font folders to read, unlike the desktop app. So the
+faces travel beside the page instead, in `fonts/cjk/v<version>/`, and the app fetches one only when
+the text on screen actually needs it (once per writing system per visit). Until it arrives, that
+text is boxes; nothing else about the page changes.
+
+- `packaging/web/package.sh` fills the folder from `CRAFT_FONTS_DIR` (its `fonts/manifest.txt`),
+  one Regular face per writing system, plus `index.json` listing them. The releases set that
+  variable; a build without it simply ships no folder.
+- **No server code and no configuration is needed**: they are ordinary static files, fetched with
+  the same relative URLs as everything else. Cache them forever anyway (the folder name carries the
+  version, so a release asking for different files asks for a different path); the sample
+  `_headers` and `.htaccess` already do, and compress them.
+- A face over 48 MB is not shipped: that is more than the browser build will read into memory.
+- **A folder you host yourself** can also carry your own faces: keep the `index.json` shape (a
+  `files` array of `system` / `name` / `style` / `file` / `bytes`, with `system` one of `hans`,
+  `hant`, `jpan`, `kore` and `file` a path relative to the page, inside the folder). Paths that
+  leave it, unknown systems and oversized files are ignored rather than fetched.
+- Users can always add a font themselves (Home ▸ Font ▸ *Load System Installed Fonts…*, where the
+  browser supports it, or Add Font). A face that already covers the text answers before anything is
+  fetched, and a fetched face joins the font database the same way an added one does — for that
+  visit only, since a browser page has nowhere to keep it.
 
 ## Embedding in a page (iframe)
 

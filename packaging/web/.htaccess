@@ -1,15 +1,26 @@
 # Apache (see HOSTING.md). Needs mod_mime; mod_deflate and mod_headers are optional.
 AddType application/wasm .wasm
 AddType text/javascript .js
+# The CJK faces the page fetches (fonts/cjk/). The app reads them with fetch(), where the type is
+# only for the browser's own reporting; these are the registered ones.
+AddType font/otf .otf
+AddType font/ttf .ttf
+AddType font/collection .ttc
+AddType font/woff .woff
+AddType font/woff2 .woff2
 
 <IfModule mod_deflate.c>
-  AddOutputFilterByType DEFLATE application/wasm text/javascript text/html
+  AddOutputFilterByType DEFLATE application/wasm text/javascript text/html font/otf font/ttf font/collection font/woff
 </IfModule>
 
 <IfModule mod_headers.c>
   <FilesMatch "\.(wasm|js)$">
     Header set Cache-Control "public, max-age=31536000, immutable"
   </FilesMatch>
+  # Named with the release, so a new build asks for a new folder instead of a revalidation.
+  <Directory "fonts/cjk">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </Directory>
   <FilesMatch "^index\.html$">
     Header set Cache-Control "no-cache"
   </FilesMatch>

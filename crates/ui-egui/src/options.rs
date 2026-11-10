@@ -326,6 +326,15 @@ fn display(app: &mut WordApp, ui: &mut Ui) {
     if ui.checkbox(&mut ruler, tl!("Show rulers")).changed() {
         let _ = app.run("view.ruler", json!({"value": ruler}));
     }
+    // The band the page display draws over each bookmark's text.
+    let mut bands = app.session.prefs.highlight_bookmarks;
+    if ui
+        .checkbox(&mut bands, tl!("Highlight the text bookmarks cover"))
+        .on_hover_text(tl!("A pale band over each bookmark's text, the names a file keeps for its own fields included. On screen only: prints, PDFs and page images never show it."))
+        .changed()
+    {
+        set(app, json!({ "highlightBookmarks": bands }));
+    }
     numeral_picker(app, ui);
     ui.add_space(8.0);
     section(ui, "Status bar");

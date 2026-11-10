@@ -4935,6 +4935,30 @@ fn the_view_key_changes_when_a_drag_takes_an_object_off_the_page() {
     assert_eq!(hidden, view_key(&app, false, Some(&object), true), "the same drag keeps the key: no re-render every frame");
 }
 
+/// File › Options › Display › the bookmark band changes the page's texture, not the page: it is
+/// drawn while a person edits, and is in no print, PDF or page image.
+#[test]
+fn the_bookmark_band_redraws_the_page_and_stays_off_the_print() {
+    let band = (0xD2u8, 0xECu8, 0xF2u8);
+    let mut app = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::from_text("Hello brave world")), Default::default());
+    app.run("select.text", json!({"text": "brave"})).unwrap();
+    app.run("insert.bookmark", json!({"name": "brave"})).unwrap();
+    let layout = app.session.layout();
+    let page = &layout.pages[0];
+    let px = |app: &WordApp, opts: &wordcraft_render::RenderOptions| {
+        let img = wordcraft_render::render_page(&app.session.doc, page, 2.0, opts);
+        img.pixels.as_chunks::<4>().0.iter().filter(|p| (p[0], p[1], p[2]) == band).count()
+    };
+    let print_before = px(&app, &Default::default());
+    assert!(page_render_options(&app, false).display.bookmarks, "banded from the start");
+    assert!(px(&app, &page_render_options(&app, false)) > 0, "the band is on the screen's page");
+    let on = view_key(&app, false, None, true);
+    app.run("file.options", json!({"highlightBookmarks": false})).unwrap();
+    assert_eq!(px(&app, &page_render_options(&app, false)), 0, "and gone once the setting is off");
+    assert_ne!(view_key(&app, false, None, true), on, "so the page's texture is drawn again");
+    assert_eq!(px(&app, &Default::default()), print_before, "and it never reaches an export");
+}
+
 /// A zoom easing in (or a pinch) shows a new size every frame for a moment: those pages are
 /// drawn unhinted, so they fill no hint caches with sizes nobody rests on. The first frame
 /// without zooming draws the page hinted again, even at the size the last zoom frame drew.

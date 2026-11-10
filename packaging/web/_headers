@@ -9,5 +9,13 @@
 /*.js
   Cache-Control: public, max-age=31536000, immutable
 
+# The CJK faces the page fetches when a screen needs one (fonts/cjk/v<version>/). The folder is
+# named with the release, so nothing in it ever changes: caching it forever means a repeat visit
+# and the second writing system asking for the same file cost no download. The app reads them with
+# fetch(), so their MIME type doesn't matter; serve them as font/otf, font/ttf or font/woff2 if you
+# like (see HOSTING.md).
+/fonts/cjk/*
+  Cache-Control: public, max-age=31536000, immutable
+
 /index.html
   Cache-Control: no-cache

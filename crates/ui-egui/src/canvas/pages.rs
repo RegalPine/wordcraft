@@ -1,8 +1,8 @@
 use super::{DocLayout, Hash, Hasher, Page, Placed, Pos, Pos2, Rect, StoryRef, WordApp, json, pos2};
 
 /// Fingerprint of everything outside the layout that changes how pages render: the view's
-/// marks and markup, dark mode, the page colour and watermark, header/body dimming, the media,
-/// and (while a drag lasts) the object left out of the page.
+/// marks and markup, dark mode, the page colour and watermark, header/body dimming, the bookmark
+/// bands, the media, and (while a drag lasts) the object left out of the page.
 /// Taken once per frame.
 pub(super) fn view_key(app: &WordApp, dim_body: bool, hidden: Option<&Pos>, hinted: bool) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -10,6 +10,7 @@ pub(super) fn view_key(app: &WordApp, dim_body: bool, hidden: Option<&Pos>, hint
     hinted.hash(&mut h);
     let v = &app.session.view;
     (v.marks, app.session.prefs.marks, v.show_markup, v.dark_mode, wordcraft_render::DARK_PAPER, v.hide_ink, v.draw.replay).hash(&mut h);
+    app.session.prefs.highlight_bookmarks.hash(&mut h);
     (v.read_mode, v.read_page_color, app.session.prefs.paper_color).hash(&mut h);
     app.session.prefs.markup.hash(&mut h);
     dim_body.hash(&mut h);
@@ -248,6 +249,7 @@ pub(super) fn page_render_options(app: &WordApp, dim_body: bool) -> wordcraft_re
     opts.display.marks = app.session.view.marks;
     opts.display.always = app.session.prefs.marks;
     opts.display.placeholders = true;
+    opts.display.bookmarks = app.session.prefs.highlight_bookmarks;
     opts.display.markup = app.session.view.show_markup;
     // Ink Replay draws the ink itself, stroke by stroke, over pages without it.
     opts.display.hide_ink = app.session.view.hide_ink || app.session.view.draw.replay;

@@ -233,6 +233,47 @@ fn focus_hides_the_chrome_drops_the_ribbon_and_esc_leaves() {
     assert!(h.query_by_label("Insert").is_some(), "Full Screen keeps the ribbon");
 }
 
+/// #1678 with Word's Ribbon Display Options: Focus's "⋯" drops the whole ribbon whatever the
+/// window's setting says — with auto-hide there would otherwise be nothing to drop — and the
+/// dropped ribbon carries neither the pin nor the display menu, since what those set is the window's
+/// layout, which Focus takes away. That also leaves one control named "Hide the ribbon" on screen
+/// rather than two, and leaves the setting itself alone.
+#[test]
+fn focus_drops_the_whole_ribbon_and_no_display_buttons() {
+    let mut a = app();
+    a.run("text.insert", json!({"text": "Hello"})).unwrap();
+    let mut h = harness(a);
+    h.run_steps(4);
+    let buttons = |h: &egui_kittest::Harness<'_, WordApp>, label: &str| h.query_all_by_role_and_label(egui::accesskit::Role::Button, label).count();
+    let click = |h: &mut egui_kittest::Harness<'_, WordApp>, label: &str| {
+        h.query_all_by_role_and_label(egui::accesskit::Role::Button, label).next().unwrap_or_else(|| panic!("no {label} button")).click()
+    };
+    for display in ["autoHide", "tabs"] {
+        h.state_mut().run("ui.ribbonDisplay", json!({"value": display})).unwrap();
+        h.state_mut().run("view.focus", json!({})).unwrap();
+        h.run_steps(4);
+        assert!(h.query_by_label("Insert").is_none(), "Focus takes the chrome away, {display}");
+        click(&mut h, "Show the ribbon");
+        h.run_steps(4);
+        assert!(h.query_by_label("Insert").is_some(), "the dropped ribbon shows its tabs: {display}");
+        assert!(h.query_by_label("Bold").is_some(), "and its commands, whatever the window's setting: {display}");
+        assert_eq!(buttons(&h, "Hide the ribbon"), 1, "one control puts the dropped ribbon away: {display}");
+        assert_eq!(buttons(&h, "Ribbon Display Options"), 0, "the overlay sets nothing about the window's ribbon: {display}");
+        assert_eq!(h.state().ui.ribbon_display.code(), display, "and the setting is as it was: {display}");
+        click(&mut h, "Hide the ribbon");
+        h.run_steps(3);
+        assert!(h.query_by_label("Insert").is_none() && h.query_by_label("Bold").is_none(), "the bar puts the dropped ribbon away: {display}");
+        h.event(egui::Event::PointerMoved(egui::pos2(700.0, 600.0)));
+        h.run_steps(3);
+        h.state_mut().run("view.focus", json!({})).unwrap();
+        h.run_steps(4);
+    }
+    h.state_mut().run("ui.ribbonDisplay", json!({"value": "commands"})).unwrap();
+    h.run_steps(4);
+    assert_eq!(buttons(&h, "Ribbon Display Options"), 1, "back in the window, the menu is at the row's far end");
+    assert_eq!(buttons(&h, "Hide the ribbon"), 1, "and so is the pin");
+}
+
 /// #1678: Focus's dropped ribbon is a command, `ui.focusRibbon`, which "⋯" and a click on the
 /// page run; outside Focus it does nothing and never fails.
 #[test]
@@ -397,6 +438,114 @@ fn non_latin_names_in_the_recover_list_get_a_face() {
     };
     assert!(!with_copy("Synthetic draft").want_system_cjk, "Latin names need no CJK font");
     assert!(with_copy("会议记录-草稿").want_system_cjk, "a CJK name in Recover loads the CJK UI font");
+}
+
+/// The browser build embeds no CJK face and has no font folders to read, so `web_cjk_faces` asks
+/// the host to fetch one from the files beside the page. The ask goes out at most once per writing
+/// system per visit, and never on a desktop host: that one reads the installed fonts and has no
+/// hook to ask. (Whether the site carries a face is the host's business; the app only asks once.)
+#[test]
+fn the_web_asks_the_host_for_a_cjk_face_once_and_the_desktop_never() {
+    use crate::app::cjk_system;
+    let doc = wordcraft_doc::Document::from_text("文档编辑");
+    let asks = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let logged = asks.clone();
+    let mut web = WordApp::new(
+        Session::new(doc.clone()),
+        Services { fetch_cjk_font: Some(Box::new(move |system| logged.borrow_mut().push(system))), ..Default::default() },
+    );
+    let needed = web.needed_cjk(i18n::Lang::EN);
+    assert!(!needed.is_empty(), "the document's hanzi are what the screen has to draw");
+    // A machine whose own fonts already cover the text never needs the site's files; one that
+    // doesn't is asked once, for the writing system the characters say.
+    let uncovered = needed.iter().any(|&c| wordcraft_fonts::FontDb::global().fallback_for(c, u32::MAX).is_none());
+    let first = web.web_cjk_faces(i18n::Lang::EN);
+    let second = web.web_cjk_faces(i18n::Lang::EN);
+    assert_eq!(first.len(), second.len(), "the same screen is given the same faces every frame");
+    assert_eq!(asks.borrow().len(), usize::from(uncovered), "{asks:?}");
+    if uncovered {
+        assert_eq!(asks.borrow()[0], cjk_system(i18n::Lang::EN, &needed), "asked for the system the text belongs to");
+    }
+
+    let mut desktop = WordApp::new(Session::new(doc), Services::default());
+    assert!(desktop.web_cjk_faces(i18n::Lang::EN).is_empty(), "a desktop host reads the installed fonts and asks nobody");
+    assert_eq!(desktop.cjk_fetched, 0, "and remembers nothing about it");
+}
+
+/// One trip per writing system per visit: the site's answer cannot change within a visit, so a
+/// site carrying no files is not asked again every frame, nor every time the user flips between
+/// two CJK languages this app has already gone to for.
+#[test]
+fn each_cjk_writing_system_is_asked_for_once() {
+    let mut a = app();
+    assert!(a.take_cjk_ask(CjkSystem::Hans));
+    assert!(!a.take_cjk_ask(CjkSystem::Hans), "the same question is not asked twice");
+    assert!(a.take_cjk_ask(CjkSystem::Japan), "another writing system is a new question");
+    assert!(a.take_cjk_ask(CjkSystem::Korea));
+    assert!(a.take_cjk_ask(CjkSystem::Hant));
+    assert!(!a.take_cjk_ask(CjkSystem::Japan), "and still not asked again after the others");
+    assert!(!a.take_cjk_ask(CjkSystem::Hans));
+    assert_eq!(a.cjk_fetched, CjkSystem::Hans.bit() | CjkSystem::Hant.bit() | CjkSystem::Japan.bit() | CjkSystem::Korea.bit());
+}
+
+/// Which file to ask the site for: what the interface language says first, then what the
+/// characters themselves say. Hangul means Korean and kana means Japanese; hanzi alone take the
+/// Simplified order, which is what the desktop keeps when no Traditional font is installed.
+#[test]
+fn the_cjk_writing_system_comes_from_the_language_then_the_characters() {
+    use crate::app::cjk_system;
+    let hanzi: Vec<char> = "文档编辑".chars().collect();
+    let kana: Vec<char> = "日本語の文書".chars().collect();
+    let hangul: Vec<char> = "한글 문서".chars().collect();
+    assert_eq!(cjk_system(i18n::Lang::EN, &hanzi), CjkSystem::Hans, "hanzi alone are the Simplified standard");
+    assert_eq!(cjk_system(i18n::Lang::EN, &kana), CjkSystem::Japan);
+    assert_eq!(cjk_system(i18n::Lang::EN, &hangul), CjkSystem::Korea);
+    assert_eq!(
+        cjk_system(i18n::Lang::EN, &hangul.iter().chain(kana.iter()).copied().collect::<Vec<_>>()),
+        CjkSystem::Korea,
+        "Hangul wins over a few kana"
+    );
+    assert_eq!(cjk_system(i18n::Lang::EN, &[]), CjkSystem::Hans, "nothing to go by stays with the order Traditional falls back to");
+    // A language that knows what it wants is followed even when the document says otherwise: a
+    // Korean interface with a Simplified-named file gets the Korean face.
+    for (code, want) in [("zh-hans", CjkSystem::Hans), ("zh-hant", CjkSystem::Hant), ("ja", CjkSystem::Japan), ("ko", CjkSystem::Korea)] {
+        let Some(lang) = i18n::Lang::from_code(code) else { continue }; // a build without craft-i18n has no such interface
+        assert_eq!(cjk_system(lang, &hanzi), want, "{code}");
+    }
+}
+
+/// The scan that decides whether a face is needed stays bounded and only ever looks at CJK: a
+/// document of nothing but hanzi costs the same as a sentence, so hostile input cannot make the
+/// app walk a million characters every frame.
+#[test]
+fn the_cjk_a_screen_needs_is_deduplicated_and_bounded() {
+    use crate::app::{MAX_DOCUMENT_CJK, MAX_INTERFACE_CJK};
+    let a = WordApp::new(Session::new(wordcraft_doc::Document::from_text(&"文档编辑".repeat(2000))), Services::default());
+    let needed = a.needed_cjk(i18n::Lang::EN);
+    assert_eq!(needed, vec!['文', '档', '编', '辑'], "8 000 characters, each one listed once");
+    let distinct: String = (0x4E00u32..0x4E00 + 4000).filter_map(char::from_u32).collect();
+    let big = WordApp::new(Session::new(wordcraft_doc::Document::from_text(&distinct)), Services::default());
+    let needed = big.needed_cjk(i18n::Lang::EN);
+    assert_eq!(needed.len(), MAX_INTERFACE_CJK + MAX_DOCUMENT_CJK, "cut at the bound, not at the document");
+    assert!(needed.iter().all(|c| wordcraft_fonts::is_cjk(*c)), "and only CJK is looked at");
+    let latin = WordApp::new(Session::new(wordcraft_doc::Document::from_text("Nothing here but Latin.")), Services::default());
+    assert!(latin.needed_cjk(i18n::Lang::EN).is_empty(), "Latin is the Latin faces' business");
+}
+
+/// A face that arrives after the interface was styled has to reach the interface too: the font
+/// database saying something changed restyles it, which is how a fetched CJK font (or an added
+/// one) shows up in the ribbon rather than only in the page.
+#[test]
+fn a_font_arriving_later_restylles_the_interface() {
+    let ctx = egui::Context::default();
+    let mut a = app();
+    ctx.run_ui(egui::RawInput::default(), |ui| a.logic(ui.ctx())).drop_without_applying_deltas();
+    assert!(a.styled, "the first frame installs the interface fonts");
+    a.font_generation = a.font_generation.wrapping_add(1);
+    a.watch_fonts(&ctx);
+    assert!(!a.styled, "a new font generation asks for them again");
+    ctx.run_ui(egui::RawInput::default(), |ui| a.logic(ui.ctx())).drop_without_applying_deltas();
+    assert!(a.styled, "and the next frame installs them");
 }
 
 /// Comment balloons draw comment text and author names with the interface faces, which have

@@ -113,7 +113,7 @@ mod state;
 use app::control_click_as_secondary;
 pub(crate) use app::works_without_document;
 pub use clock::now_ms;
-pub use services::{HostSaveFn, Inbox, Services};
+pub use services::{CjkSystem, HostSaveFn, Inbox, Services};
 pub use state::{AutoSaveBlock, DefaultApp, SaveChoice, keeps_everything};
 
 /// Web: a save the browser's picker hasn't finished ([`async_saves`]).
@@ -698,6 +698,10 @@ pub struct WordApp {
     /// CJK text is (about to be) on screen in a non-CJK interface, e.g. the language names in
     /// File ▸ Options: load the installed CJK fallback font if no embedded face covers it.
     pub(crate) want_system_cjk: bool,
+    /// Which writing systems the web host was already asked to fetch a CJK face for this visit, one
+    /// bit each (see [`CjkSystem::bit`]), so a site without the files isn't asked again every frame.
+    /// See [`Services::fetch_cjk_font`].
+    cjk_fetched: u8,
     /// Arabic text is (about to be) on screen in a non-Arabic interface, e.g. "العربية" in the
     /// language picker or Language packs list: load an installed Arabic font when no embedded face
     /// covers it (dev builds without craft-fonts).
